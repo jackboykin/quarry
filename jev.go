@@ -89,15 +89,21 @@ func locate(token string, md []byte, q string) (string, error) {
 	// on a changelog has its "Highlights", and only the page's order says which
 	// is latest. The top two heading levels, in page order, give every question
 	// that map.
+	// a table of contents names everything and says nothing; the outline
+	// carries the page's shape. But on a page that is mostly links, a
+	// front page of stories, the links are the content.
+	all := sections(md)
+	linky := func(s section) bool { return len(strings.Join(mdLink.FindAllString(s.text, -1), ""))*2 > len(s.text) }
+	if kept := slices.DeleteFunc(slices.Clone(all), linky); len(kept)*2 >= len(all) {
+		all = kept
+	}
+	if len(all) <= 3 {
+		return fmt.Sprintf("a short page of %d sections; check it directly", len(all)), nil
+	}
 	var secs []section
 	var outline []string
 	size, headed := 0, 0
-	for _, s := range sections(md) {
-		// a table of contents names everything and says nothing; the outline
-		// carries the page's shape
-		if links := len(strings.Join(mdLink.FindAllString(s.text, -1), "")); links*2 > len(s.text) {
-			continue
-		}
+	for _, s := range all {
 		if h := strings.Count(s.trail, " › "); h <= 1 && (len(outline) == 0 || outline[len(outline)-1] != s.trail) && size < outlineCap {
 			outline, size = append(outline, s.trail), size+len(s.trail)
 		}
@@ -113,6 +119,7 @@ func locate(token string, md []byte, q string) (string, error) {
 	// page whose headings say what its sections hold. A page mostly split by
 	// size rather than by heading is read whole, however long, since its
 	// opening lines show only the first of the things a section holds.
+	total := len(secs)
 	if len(md) > twoPassSize && headed*4 >= len(secs) {
 		p, err := score(token, state, secs, shortlistPeek)
 		if err != nil {
@@ -137,8 +144,8 @@ func locate(token string, md []byte, q string) (string, error) {
 	}
 	// a listing page answers an open request everywhere at once; three of
 	// fourteen near-ties are picked by noise, so say how wide the field is
-	if len(keys)*3 > len(secs) {
-		return fmt.Sprintf("%d of %d sections score as answering it, so these pointers are near-ties; best first: lines %s", len(keys), len(secs), strings.Join(parts, ", ")), nil
+	if len(keys)*3 > total {
+		return fmt.Sprintf("%d of %d sections score as answering it, so these pointers are near-ties; best first: lines %s", len(keys), total, strings.Join(parts, ", ")), nil
 	}
 	return "read lines " + strings.Join(parts, ", "), nil
 }
