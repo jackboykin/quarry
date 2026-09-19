@@ -135,6 +135,11 @@ func locate(token string, md []byte, q string) (string, error) {
 	for _, k := range keys[:min(len(keys), 3)] {
 		parts = append(parts, fmt.Sprintf("%s (%.2f)", k, p[k]))
 	}
+	// a listing page answers an open request everywhere at once; three of
+	// fourteen near-ties are picked by noise, so say how wide the field is
+	if len(keys)*3 > len(secs) {
+		return fmt.Sprintf("%d of %d sections answer the request, best first: lines %s", len(keys), len(secs), strings.Join(parts, ", ")), nil
+	}
 	return "the answer is likely at lines " + strings.Join(parts, ", "), nil
 }
 
