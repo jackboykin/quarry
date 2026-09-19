@@ -1,5 +1,5 @@
 {
-  description = "Search the web and read pages from disk, with Exa and Jev";
+  description = "Let agents efficiently read web sources themselves, with Exa and Jev";
 
   inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
 
@@ -26,7 +26,7 @@
           wrapProgram $out/bin/quarry --prefix PATH : ${lib.makeBinPath [pkgs.poppler-utils]}
         '';
         meta = {
-          description = "Search the web and read pages from disk, with Exa and Jev";
+          description = "Let agents efficiently read web sources themselves, with Exa and Jev";
           homepage = "https://github.com/jackboykin/quarry";
           license = lib.licenses.mit;
           mainProgram = "quarry";
