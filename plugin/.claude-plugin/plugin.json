@@ -1,0 +1,11 @@
+{
+  "name": "quarry",
+  "description": "Adds Exa's results to WebSearch, and saves each WebFetch page to disk with the lines that answer the prompt",
+  "author": {
+    "name": "Jack Boykin",
+    "url": "https://github.com/jackboykin"
+  },
+  "homepage": "https://github.com/jackboykin/quarry",
+  "repository": "https://github.com/jackboykin/quarry",
+  "license": "MIT"
+}
