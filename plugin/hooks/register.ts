@@ -15,7 +15,7 @@ export const register: Register = (on) => {
       ...r,
       context: [
         ...(r.context ?? []),
-        `full: ${path} — read the source before relying on the answer above`,
+        `The answer above is a paraphrase of ${path} and may be inaccurate; check what you repeat against the file:`,
         ...where.map((l) => l.trim()),
       ],
     };

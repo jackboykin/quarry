@@ -128,7 +128,7 @@ func locate(token string, md []byte, q string) (string, error) {
 
 	keys := slices.DeleteFunc(slices.Collect(maps.Keys(p)), func(k string) bool { return p[k] < 0.7 })
 	if len(keys) == 0 {
-		return "no section clearly answers the question", nil
+		return "no section scores as answering this", nil
 	}
 	slices.SortFunc(keys, func(a, b string) int { return cmp.Compare(p[b], p[a]) })
 	var parts []string
@@ -138,9 +138,9 @@ func locate(token string, md []byte, q string) (string, error) {
 	// a listing page answers an open request everywhere at once; three of
 	// fourteen near-ties are picked by noise, so say how wide the field is
 	if len(keys)*3 > len(secs) {
-		return fmt.Sprintf("%d of %d sections answer the request, best first: lines %s", len(keys), len(secs), strings.Join(parts, ", ")), nil
+		return fmt.Sprintf("%d of %d sections score as answering it, so these pointers are near-ties; best first: lines %s", len(keys), len(secs), strings.Join(parts, ", ")), nil
 	}
-	return "the answer is likely at lines " + strings.Join(parts, ", "), nil
+	return "read lines " + strings.Join(parts, ", "), nil
 }
 
 func (s section) key() string { return fmt.Sprintf("%d–%d", s.from, s.to) }
