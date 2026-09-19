@@ -1,14 +1,31 @@
 # quarry
 
-Claude Code's WebFetch gives the model a small model's summary. Its mistakes kept annoying me enough to build a replacement. quarry gives models an efficient way to read the results themeslves. Personal tool I have used for a while that I only found interesting enough to publish now with claude mods and jev; nothing polished or guaranteed.
+Claude Code's WebFetch and similar tools give the main model a small model's summary. Its mistakes kept annoying me enough to build a replacement. quarry gives models an efficient way to read the results themselves. quarry is a personal tool I have used for a while that I only found interesting enough to publish now with claude mods and jev; nothing polished or guaranteed.
 
-- **WebFetch**: saves the page to `/tmp/quarry` and hands the model its path, with the line ranges [Jev](https://typesafe.ai) scores as answering the prompt. Falls back gracefully if jev cannot be reached.
-- **WebSearch**: adds [Exa](https://exa.ai)'s results for the same query.
+- **fetch**: saves the page to disk and hands the model its path, with the line ranges [Jev](https://typesafe.ai) scores as answering the prompt. Falls back gracefully if jev cannot be reached.
+- **search**: [Exa](https://exa.ai)'s results with highlights.
+
+## Install
+
+The binary, then whichever host you use.
 
 ```sh
 go install github.com/jackboykin/quarry@latest
+```
+
+A flake.nix is also available.
+
+Keys: `EXA_API_KEY` for search, `TYPESAFE_API_KEY` for fetch line ranges. They can also live in `~/.config/quarry/` as `exa-api-key` and `typesafe-api-key`.
+
+**Claude Code** — augments the built-in WebFetch and WebSearch. Needs `CLAUDE_CODE_ENABLE_FUNCTION_HOOKS=1` and a recent version.
+
+```sh
 claude plugin marketplace add jackboykin/quarry
 claude plugin install quarry@quarry
 ```
 
-Requires `CLAUDE_CODE_ENABLE_FUNCTION_HOOKS=1`, `EXA_API_KEY` for search, and `TYPESAFE_API_KEY` for fetch line ranges. The same keys can live in `~/.config/quarry/` as `exa-api-key` and `typesafe-api-key`.
+**[pi](https://github.com/badlogic/pi-mono)** — adds `web_search` and `web_fetch` tools.
+
+```sh
+pi install git:github.com/jackboykin/quarry
+```

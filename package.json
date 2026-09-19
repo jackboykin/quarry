@@ -1,0 +1,6 @@
+{
+  "name": "quarry",
+  "private": true,
+  "keywords": ["pi-package"],
+  "pi": { "extensions": ["./pi/quarry.ts"] }
+}
