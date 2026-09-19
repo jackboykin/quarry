@@ -2,7 +2,7 @@ package main
 
 // Jev, TypeSafe's System One model, answers typed questions with calibrated
 // probabilities and writes no text. Each section of a page becomes one yes/no
-// question, "does this passage hold what the question asks for?". Questions are
+// question, "would an answer to the request draw on this passage?". Questions are
 // scored independently, so a long page spreads over parallel requests and the
 // probabilities still compare across them. The answer is only ever a line range
 // of the saved file: a pointer to read, never a paraphrase to trust.
@@ -171,9 +171,12 @@ func score(token string, state map[string]any, secs []section, peek int) (map[st
 			qs := map[string]any{}
 			for _, s := range b {
 				qs[s.key()] = map[string]any{"type": "noul", "instructions": map[string]string{
-					"task":    "Does this passage of the page directly contain what the request in the state asks for?",
+					"task":    "The request in the state is a question or an instruction, such as summarize, explain, or list, that someone will carry out by reading the page. Does this passage state something their answer would draw on?",
 					"section": s.trail,
 					"passage": text(s),
+				}, "criteria": map[string]string{
+					"true":  "The passage states facts, claims, or details that belong in an answer to the request, even if it covers only part of the request",
+					"false": "The passage is about something else, or only names the topic without saying anything about it",
 				}}
 			}
 			var out struct {
