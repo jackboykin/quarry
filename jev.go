@@ -126,7 +126,7 @@ func locate(token string, md []byte, q string) (string, error) {
 		return "", err
 	}
 
-	keys := slices.DeleteFunc(slices.Collect(maps.Keys(p)), func(k string) bool { return p[k] < 0.5 })
+	keys := slices.DeleteFunc(slices.Collect(maps.Keys(p)), func(k string) bool { return p[k] < 0.7 })
 	if len(keys) == 0 {
 		return "no section clearly answers the question", nil
 	}
