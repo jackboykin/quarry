@@ -7,7 +7,7 @@ Claude Code's WebFetch and similar tools give the main model a small model's sum
 
 ## Install
 
-The binary, then whichever host you use.
+The binary, then whichever host you use. Any other host that reads Agent Skills can use [skills/quarry](skills/quarry/SKILL.md).
 
 ```sh
 go install github.com/jackboykin/quarry@latest
@@ -24,7 +24,7 @@ claude plugin marketplace add jackboykin/quarry
 claude plugin install quarry@quarry
 ```
 
-**[pi](https://github.com/badlogic/pi-mono)** — adds `web_search` and `web_fetch` tools.
+**[pi](https://github.com/badlogic/pi-mono)**
 
 ```sh
 pi install git:github.com/jackboykin/quarry

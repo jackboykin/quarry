@@ -19,6 +19,12 @@ const beside = async ($: EngineInterface, { tool, tool_use_id, ...input }: ToolC
 };
 
 export const register: Register = (on) => {
+  // The whole skill, as quarry's own help prints it, once per conversation and again after compaction or /clear
+  on('prompt.context', async ($, e, next) => {
+    const help = (await $.process.run([quarry, '-h']).catch(() => null))?.stderr.trim();
+    return next(help ? { ...e, blocks: [...e.blocks, { name: 'quarry', text: help }] } : e);
+  });
+
   // WebFetch answers as before; quarry also saves the page and has Jev point to the lines that answer the prompt
   on('tool.call', { tool: 'WebFetch' }, async ($, e, next) => {
     const after = await beside($, e, ['-f', e.url, e.prompt]);

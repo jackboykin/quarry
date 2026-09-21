@@ -1,6 +1,6 @@
 {
   "files": {
-    "includes": ["plugin/hooks/**", "pi/**"]
+    "includes": ["plugin/hooks/**"]
   },
   "formatter": {
     "indentStyle": "space",

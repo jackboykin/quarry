@@ -7,6 +7,7 @@ import (
 	"bytes"
 	"cmp"
 	"crypto/tls"
+	_ "embed"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -32,13 +33,17 @@ import (
 	"golang.org/x/net/html"
 )
 
-const usage = `quarry -s <query>      search: numbered results with highlights
-quarry -f <url>... [question]
-                       fetch to disk: each saved path and its size,
-                       and with a question, the lines likely to answer it
-  -n  number of results (default 8)
-  -d  only this domain, or -d -host to exclude it (repeatable)
-`
+//go:embed skills/quarry/SKILL.md
+var skill string
+
+// the help a person reads is the skill a model reads: its description, then its body
+var usage = func() string {
+	_, fm, _ := strings.Cut(skill, "---\n")
+	fm, body, _ := strings.Cut(fm, "---\n")
+	_, desc, _ := strings.Cut(fm, "description: ")
+	desc, _, _ = strings.Cut(desc, "\n")
+	return desc + "\n" + body
+}()
 
 const (
 	maxChars = 200000 // of a page's text, when exa fetches it for us
