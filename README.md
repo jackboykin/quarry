@@ -17,7 +17,7 @@ A flake.nix is also available.
 
 Keys: `EXA_API_KEY` for search, `TYPESAFE_API_KEY` for fetch line ranges. They can also live in `~/.config/quarry/` as `exa-api-key` and `typesafe-api-key`.
 
-**Claude Code** — augments the built-in WebFetch and WebSearch. Needs `CLAUDE_CODE_ENABLE_FUNCTION_HOOKS=1` and a recent version.
+**Claude Code** — augments the built-in WebFetch and WebSearch. Needs a recent version.
 
 ```sh
 claude plugin marketplace add jackboykin/quarry
