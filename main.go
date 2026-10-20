@@ -163,6 +163,7 @@ func post(endpoint string, req map[string]any) (*exaResponse, error) {
 	r, _ := http.NewRequest("POST", "https://api.exa.ai/"+endpoint, bytes.NewReader(body))
 	r.Header.Set("x-api-key", apiKey)
 	r.Header.Set("Content-Type", "application/json")
+	r.Header.Set("Exa-Beta", "dynamic-highlights-2026-08-28")
 	resp, err := exaClient.Do(r)
 	if err != nil {
 		return nil, err
@@ -182,7 +183,11 @@ func post(endpoint string, req map[string]any) (*exaResponse, error) {
 var spaces = regexp.MustCompile(`\s+`)
 
 func search(q string) {
-	req := map[string]any{"query": q, "numResults": num, "contents": map[string]any{"highlights": true}}
+	req := map[string]any{
+		"query":      q,
+		"numResults": num,
+		"contents":   map[string]any{"highlights": map[string]any{"dynamic": true, "verbosity": "low"}},
+	}
 	if len(include) > 0 {
 		req["includeDomains"] = include
 	}
@@ -205,7 +210,7 @@ func search(q string) {
 		}
 		fmt.Fprintf(w, "[%d] %s\n%s\n", i+1, title, r.URL)
 		for _, h := range r.Highlights {
-			fmt.Fprintf(w, "  %s\n", clip(spaces.ReplaceAllString(h, " "), 300))
+			fmt.Fprintf(w, "  %s\n", spaces.ReplaceAllString(h, " "))
 		}
 		fmt.Fprintln(w)
 	}
