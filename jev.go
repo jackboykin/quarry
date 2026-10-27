@@ -156,20 +156,27 @@ func (s section) key() string { return fmt.Sprintf("%d–%d", s.from, s.to) }
 // reading only its first peek characters when peek > 0; the sections spread
 // over parallel requests of jevBudget characters each
 func score(token string, state map[string]any, secs []section, peek int) (map[string]float64, error) {
-	text := func(s section) string {
-		if peek > 0 {
-			return clip(s.text, peek)
-		}
-		return s.text
-	}
-	var batches [][]section
+	var batches []map[string]any
 	size := jevBudget
 	for _, s := range secs {
-		if size+len(text(s)) > jevBudget {
-			batches, size = append(batches, nil), 0
+		text := s.text
+		if peek > 0 {
+			text = clip(text, peek)
 		}
-		batches[len(batches)-1] = append(batches[len(batches)-1], s)
-		size += len(text(s))
+		q := map[string]any{"type": "noul", "instructions": map[string]string{
+			"task":    "The request in the state is a question or an instruction, such as summarize, explain, or list, that someone will carry out by reading the page. Does this passage state something their answer would draw on?",
+			"section": s.trail,
+			"passage": text,
+		}, "criteria": map[string]string{
+			"true":  "The passage states facts, claims, or details that belong in an answer to the request, even if it covers only part of the request",
+			"false": "The passage is about something else, or only names the topic without saying anything about it",
+		}}
+		b, _ := json.Marshal(q)
+		if size+len(b) > jevBudget {
+			batches, size = append(batches, map[string]any{}), 0
+		}
+		batches[len(batches)-1][s.key()] = q
+		size += len(b)
 	}
 
 	p := map[string]float64{}
@@ -178,19 +185,8 @@ func score(token string, state map[string]any, secs []section, peek int) (map[st
 		mu       sync.Mutex
 		wg       sync.WaitGroup
 	)
-	for _, b := range batches {
+	for _, qs := range batches {
 		wg.Go(func() {
-			qs := map[string]any{}
-			for _, s := range b {
-				qs[s.key()] = map[string]any{"type": "noul", "instructions": map[string]string{
-					"task":    "The request in the state is a question or an instruction, such as summarize, explain, or list, that someone will carry out by reading the page. Does this passage state something their answer would draw on?",
-					"section": s.trail,
-					"passage": text(s),
-				}, "criteria": map[string]string{
-					"true":  "The passage states facts, claims, or details that belong in an answer to the request, even if it covers only part of the request",
-					"false": "The passage is about something else, or only names the topic without saying anything about it",
-				}}
-			}
 			var out struct {
 				Answers map[string]struct{ Noul float64 }
 			}
