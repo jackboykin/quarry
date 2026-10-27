@@ -220,9 +220,14 @@ func jevPost(token string, req map[string]any, out any) error {
 		return err
 	}
 	if resp.StatusCode != 200 {
-		var e struct{ Detail struct{ Message string } }
+		var e struct {
+			Detail struct {
+				Message   string
+				ErrorType string `json:"error_type"`
+			}
+		}
 		json.Unmarshal(b, &e)
-		return fmt.Errorf("jev %d: %s", resp.StatusCode, cmp.Or(e.Detail.Message, resp.Status))
+		return fmt.Errorf("jev %d: %s", resp.StatusCode, cmp.Or(e.Detail.Message, e.Detail.ErrorType, resp.Status))
 	}
 	return json.Unmarshal(b, out)
 }
