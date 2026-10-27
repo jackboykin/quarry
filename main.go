@@ -501,15 +501,20 @@ func fromHTML(body []byte, final string) []byte {
 		return nil
 	}
 	all := dom.AllNodes(doc)
-	// The page's own semantic markup, in order of how tightly it wraps the
-	// content. Falling back to the whole document means the worst case is more
-	// text, never less.
+	// a forum's posts and a listing's teasers are articles too, so an article
+	// is the content only when it is the page's one article
+	articles := 0
+	for _, n := range all {
+		if n.Type == html.ElementNode && n.Data == "article" {
+			articles++
+		}
+	}
 	root := doc
 narrow:
 	for _, match := range []func(*html.Node) bool{
-		func(n *html.Node) bool { return n.Data == "article" },
 		func(n *html.Node) bool { return n.Data == "main" },
 		func(n *html.Node) bool { return dom.GetAttributeOr(n, "role", "") == "main" },
+		func(n *html.Node) bool { return n.Data == "article" && articles == 1 },
 	} {
 		for _, n := range all {
 			if n.Type == html.ElementNode && match(n) && len(strings.TrimSpace(dom.CollectText(n))) > 500 {
