@@ -186,7 +186,7 @@ func search(q string) {
 	req := map[string]any{
 		"query":      q,
 		"numResults": num,
-		"contents":   map[string]any{"highlights": map[string]any{"dynamic": true, "verbosity": "low"}},
+		"contents":   map[string]any{"highlights": map[string]any{"dynamic": true}},
 	}
 	if len(include) > 0 {
 		req["includeDomains"] = include
