@@ -198,6 +198,11 @@ func search(q string) {
 	if err != nil {
 		die("%v", err)
 	}
+	if len(res.Results) == 0 && len(include) > 0 {
+		die("no results from %s; exa may not index it", strings.Join(include, ", "))
+	} else if len(res.Results) == 0 {
+		die("no results")
+	}
 	w := bufio.NewWriter(os.Stdout)
 	defer w.Flush()
 	for i, r := range res.Results {
