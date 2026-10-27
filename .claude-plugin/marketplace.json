@@ -1,0 +1,11 @@
+{
+  "name": "quarry",
+  "owner": { "name": "Jack Boykin", "url": "https://github.com/jackboykin" },
+  "plugins": [
+    {
+      "name": "quarry",
+      "source": "./plugin",
+      "description": "Puts quarry's usage in every session, so the model reaches for it"
+    }
+  ]
+}

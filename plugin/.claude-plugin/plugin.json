@@ -1,0 +1,7 @@
+{
+  "name": "quarry",
+  "description": "Puts quarry's usage in every session, so the model reaches for it",
+  "author": { "name": "Jack Boykin", "url": "https://github.com/jackboykin" },
+  "homepage": "https://github.com/jackboykin/quarry",
+  "license": "MIT"
+}

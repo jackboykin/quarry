@@ -1,0 +1,5 @@
+{
+  "hooks": {
+    "SessionStart": [{ "hooks": [{ "type": "command", "command": "quarry -h 2>&1 || true" }] }]
+  }
+}

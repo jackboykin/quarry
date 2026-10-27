@@ -11,6 +11,15 @@ Claude Code's WebFetch and similar tools give the main model a small model's sum
 go install github.com/jackboykin/quarry@latest
 ```
 
-A flake.nix is also available. Hosts that read Agent Skills can use [skills/quarry](skills/quarry/SKILL.md); for [pi](https://github.com/badlogic/pi-mono), `pi install git:github.com/jackboykin/quarry`.
+A flake.nix is also available. Hosts that read Agent Skills can use [skills/quarry](skills/quarry/SKILL.md).
+
+**Claude Code**: a plugin whose one hook puts quarry's usage in every session.
+
+```sh
+claude plugin marketplace add jackboykin/quarry
+claude plugin install quarry@quarry
+```
+
+**[pi](https://github.com/badlogic/pi-mono)**: `pi install git:github.com/jackboykin/quarry`
 
 Keys: `EXA_API_KEY` for search, `TYPESAFE_API_KEY` for fetch line ranges. They can also live in `~/.config/quarry/` as `exa-api-key` and `typesafe-api-key`.
