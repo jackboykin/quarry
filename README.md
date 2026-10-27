@@ -2,7 +2,7 @@
 
 Claude Code's WebFetch and similar tools give the main model a small model's summary. Its mistakes kept annoying me enough to build a replacement. quarry gives models an efficient way to read the results themselves. quarry is a personal tool I have used for a while that I only found interesting enough to publish now with claude mods and jev; nothing polished or guaranteed.
 
-- **fetch**: saves the page to disk and hands the model its path, with the line ranges [Jev](https://typesafe.ai) scores as answering the prompt. Falls back gracefully if jev cannot be reached.
+- **fetch**: saves the page to disk and hands the model its path, with the line ranges [Jev](https://typesafe.ai) scores as answering the prompt. Every page is also asked of Exa, whose copy is kept when the page as served came back hollow: a login wall, a footer, a file view cut short.
 - **search**: [Exa](https://exa.ai)'s results with highlights.
 
 ## Install

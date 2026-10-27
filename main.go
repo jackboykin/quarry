@@ -46,7 +46,7 @@ var usage = func() string {
 }()
 
 const (
-	maxChars = 200000 // of a page's text, when exa fetches it for us
+	maxChars = 1_000_000
 	maxBody  = 32 << 20
 	par      = 8 // pages fetched at once
 )
@@ -138,8 +138,8 @@ func isURL(s string) bool { return strings.HasPrefix(s, "http://") || strings.Ha
 // ─── exa ───────────────────────────────────────────────────────────────────
 
 type exaResult struct {
-	URL, Title, PublishedDate, Text string
-	Highlights                      []string
+	ID, URL, Title, PublishedDate, Text string
+	Highlights                          []string
 }
 
 type exaResponse struct {
@@ -231,49 +231,49 @@ func clip(s string, n int) string {
 // ─── read ──────────────────────────────────────────────────────────────────
 
 type page struct {
-	url, status string // status: ok | retry | dead
-	notes       []string
-	md, bin     []byte
+	url   string
+	ok    bool
+	notes []string
+	md    []byte
+	bin   []byte
 }
 
 func (p *page) say(f string, a ...any) { p.notes = append(p.notes, fmt.Sprintf(f, a...)) }
 
+func words(md []byte) int { return len(word.FindAllIndex(linkURL.ReplaceAll(md, []byte("]")), -1)) }
+
+var (
+	linkURL = regexp.MustCompile(`\]\([^)]*\)`)
+	word    = regexp.MustCompile(`[\p{L}\p{N}]+`)
+)
+
 func read(urls []string, question string) {
-	// Phase 1 — fetch every url concurrently. Nothing reaches disk here: an error
-	// page is a successful transfer as far as http is concerned, so a page that
-	// 403s today would otherwise overwrite the good extract it gave yesterday.
-	// Status decides publication, in phase 3.
+	// Every page is also asked of exa, and exa's copy kept when it has over
+	// twice the words: where both got the page they agree within a few
+	// percent, and where one did not, the other has many times the text.
+	// Nothing reaches disk before that, so a page that 403s today keeps
+	// yesterday's good copy.
 	pages := make([]*page, len(urls))
 	sem := make(chan struct{}, par)
 	var wg sync.WaitGroup
 	for i, u := range urls {
-		wg.Add(1)
-		sem <- struct{}{}
-		go func() { defer wg.Done(); pages[i] = fetch(u); <-sem }()
+		wg.Go(func() { sem <- struct{}{}; pages[i] = fetch(u); <-sem })
+	}
+	exa := &exaResponse{}
+	// exa's cache, crawling only on a miss: forcing a crawl timed out on
+	// ~1 in 4 wikipedia reads
+	if apiKey != "" {
+		wg.Go(func() {
+			r, err := post("contents", map[string]any{"urls": urls, "text": map[string]any{"maxCharacters": maxChars}})
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "quarry: %v\n", err)
+				return
+			}
+			exa = r
+		})
 	}
 	wg.Wait()
 
-	// Phase 2 — one exa call for the urls the local fetch could not get. It reads
-	// exa's cache first and crawls only on a miss, as exa recommends: forcing a
-	// crawl (maxAgeHours 0) timed out on ~1 in 4 wikipedia reads, and a slightly
-	// older copy beats none.
-	var want []string
-	for _, p := range pages {
-		if p.status == "retry" {
-			want = append(want, p.url)
-		}
-	}
-	exa := &exaResponse{}
-	if apiKey != "" && len(want) > 0 {
-		req := map[string]any{"urls": want, "text": map[string]any{"maxCharacters": maxChars}}
-		if r, err := post("contents", req); err != nil {
-			fmt.Fprintf(os.Stderr, "quarry: %v\n", err)
-		} else {
-			exa = r
-		}
-	}
-
-	// Phase 3 — publish and report, in the order the urls were given.
 	jevKey := key("TYPESAFE_API_KEY", "typesafe-api-key")
 	w := bufio.NewWriter(os.Stdout)
 	defer w.Flush()
@@ -281,7 +281,7 @@ func read(urls []string, question string) {
 		out := outDir + "/" + slug(p.url) + ".md"
 		var hit exaResult
 		for _, r := range exa.Results {
-			if r.URL == p.url {
+			if r.ID == p.url || r.URL == p.url {
 				hit = r
 			}
 		}
@@ -292,18 +292,26 @@ func read(urls []string, question string) {
 			}
 		}
 
-		if p.status == "retry" {
-			if hit.Text != "" {
-				p.md, p.bin, p.status = []byte(hit.Text), nil, "ok"
-				// a rescue from exa's cache may lag the live page; say which it was
-				p.say("text came from exa (%s)", cmp.Or(st.Source, "unknown source"))
-			} else {
-				p.say("exa could not reach it either — likely private, geoblocked, or JS-only; open it in a browser")
+		mine := 0
+		if p.ok {
+			mine = words(p.md)
+			if mine == 0 && p.bin == nil {
+				p.say("the page as served has no text")
 			}
+		}
+		if theirs := words([]byte(hit.Text)); theirs > 2*mine {
+			if mine > 0 {
+				p.say("the page as served had %d words, exa's copy %d; kept exa's", mine, theirs)
+			}
+			p.md, p.bin, p.ok = []byte(hit.Text), nil, true
+			p.say("text came from exa (%s)", cmp.Or(st.Source, "unknown source"))
+		} else if mine == 0 && p.bin == nil {
+			p.ok = false
+			p.say("exa could not get it either (%s)", strings.ToLower(cmp.Or(st.Error.Tag, "no text")))
 		}
 
 		saved := false
-		if p.status == "ok" {
+		if p.ok {
 			if p.bin != nil {
 				bin := strings.TrimSuffix(out, ".md") + ".bin"
 				os.WriteFile(bin, p.bin, 0o644)
@@ -356,7 +364,6 @@ var browser = map[string]string{
 var (
 	unslug    = regexp.MustCompile(`[^A-Za-z0-9._-]+`)
 	scheme    = regexp.MustCompile(`^https?://`)
-	jsShell   = regexp.MustCompile(`(?i)does not seem to support JavaScript|enable JavaScript to (run|use|view|continue)|You need to enable JavaScript`)
 	webClient = &http.Client{Timeout: 45 * time.Second}
 )
 
@@ -373,7 +380,7 @@ func slug(u string) string {
 }
 
 func fetch(u string) *page {
-	p := &page{url: u, status: "ok"}
+	p := &page{url: u}
 	req, _ := http.NewRequest("GET", u, nil)
 	for k, v := range browser {
 		req.Header.Set(k, v)
@@ -388,9 +395,6 @@ func fetch(u string) *page {
 		}
 	}
 	if err != nil {
-		// name the failure, not a bare "could not be reached"; retry either way,
-		// so exa tries next and appends its verdict in phase 3
-		p.status = "retry"
 		var dnsErr *net.DNSError
 		var certErr *tls.CertificateVerificationError
 		var netErr net.Error
@@ -400,7 +404,7 @@ func fetch(u string) *page {
 		case errors.Is(err, syscall.ECONNREFUSED):
 			p.say("connection refused — nothing is listening there")
 		case errors.As(err, &netErr) && netErr.Timeout():
-			p.say("timed out after 45s — the server hung; exa's cache may still hold it")
+			p.say("timed out after 45s — the server hung")
 		case errors.As(err, &certErr):
 			p.say("tls handshake failed — cert or protocol mismatch")
 		default:
@@ -408,20 +412,18 @@ func fetch(u string) *page {
 		}
 		return p
 	}
+	if c := resp.StatusCode; c/100 != 2 {
+		p.say("HTTP %d", c)
+		return p
+	}
+	if final := resp.Request.URL.String(); final != req.URL.String() {
+		p.say("redirected to %s", final)
+	}
 
-	ctype := resp.Header.Get("Content-Type")
-	final := resp.Request.URL.String()
-	usable, thin, shell := true, false, false
-	switch {
+	p.ok = true
+	switch ctype := resp.Header.Get("Content-Type"); {
 	case strings.Contains(ctype, "html"):
-		p.md = fromHTML(body, final)
-		// Two bars, because saying "this looks thin" is free and reaching for
-		// someone else's crawler is not. A short page is common and legitimate,
-		// so thin means little text out of a lot of markup; a page that yields
-		// nothing at all is the only shape exa can improve on.
-		thin, usable = len(p.md) < 400 && len(body) > 50*len(p.md), len(p.md) >= 120
-		// its own "enable JavaScript" plea betrays a shell whose content never loaded
-		shell = jsShell.Match(p.md)
+		p.md = fromHTML(body, resp.Request.URL.String())
 	case strings.Contains(ctype, "json"):
 		var b bytes.Buffer
 		if json.Indent(&b, body, "", "  ") == nil {
@@ -431,40 +433,12 @@ func fetch(u string) *page {
 		}
 	case strings.Contains(ctype, "pdf"):
 		p.md = fromPDF(body)
-		usable = len(p.md) > 0
 	case strings.HasPrefix(ctype, "text/"), strings.Contains(ctype, "markdown"), strings.Contains(ctype, "xml"),
 		strings.Contains(ctype, "x-sh"), strings.Contains(ctype, "javascript"):
 		p.md = body
 	default:
 		p.bin = body
 		p.md = fmt.Appendf(nil, "# binary content\n%s, %d bytes\n", ctype, len(body))
-	}
-
-	// Escalate only on evidence that another crawler could do better: a block, a
-	// rate limit, an outage, or markup that rendered to nothing. A 404 is not a
-	// failure to fetch, it is a successful report of absence — retrying is theatre.
-	switch c := resp.StatusCode; {
-	case c/100 == 2:
-		switch {
-		case !usable:
-			p.status = "retry"
-			p.say("the page rendered to no text at all — fetching via exa's crawler")
-		case shell:
-			// a shell is empty in substance, the one shape exa reliably improves on
-			p.status = "retry"
-			p.say("javascript-rendered shell — the content never loaded; fetching via exa's crawler")
-		case thin:
-			p.say("thin extraction — the page may be JS-rendered or mostly outside its main content")
-		}
-	case c == 404 || c == 410:
-		p.status = "dead"
-		p.say("HTTP %d — the document is gone", c)
-	default:
-		p.status = "retry"
-		p.say("HTTP %d — the server returned an error page, not the document", c)
-	}
-	if final != u {
-		p.say("redirected to %s", final)
 	}
 	return p
 }
