@@ -464,9 +464,17 @@ func fetch(u string) *page {
 	return p
 }
 
+// The reader greps, so text stays as written: no escapes, and < > ride
+// through the converter as noncharacters, which no page can contain.
+var (
+	hideAngles = strings.NewReplacer("<", "\uFDD0", ">", "\uFDD1")
+	showAngles = strings.NewReplacer("\uFDD0", "<", "\uFDD1", ">")
+)
+
 var conv = func() *converter.Converter {
-	c := converter.NewConverter(converter.WithPlugins(
+	c := converter.NewConverter(converter.WithEscapeMode(converter.EscapeModeDisabled), converter.WithPlugins(
 		base.NewBasePlugin(), commonmark.NewCommonmarkPlugin(), table.NewTablePlugin()))
+	c.Register.TextTransformer(func(_ converter.Context, s string) string { return hideAngles.Replace(s) }, converter.PriorityEarly)
 	// image urls are unreadable noise; alt text is the only part worth keeping
 	c.Register.RendererFor("img", converter.TagTypeInline, func(_ converter.Context, w converter.Writer, n *html.Node) converter.RenderStatus {
 		if alt := strings.TrimSpace(dom.GetAttributeOr(n, "alt", "")); alt != "" {
@@ -511,7 +519,7 @@ narrow:
 		}
 	}
 	md, _ := conv.ConvertNode(root, converter.WithDomain(final))
-	return append(md, '\n')
+	return append([]byte(showAngles.Replace(string(md))), '\n')
 }
 
 func fromPDF(body []byte) []byte {
