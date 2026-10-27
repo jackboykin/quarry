@@ -37,7 +37,7 @@
     devShells = forAllSystems (system: let
       pkgs = nixpkgs.legacyPackages.${system};
     in {
-      default = pkgs.mkShell {packages = [pkgs.go pkgs.typescript pkgs.biome];};
+      default = pkgs.mkShell {packages = [pkgs.go];};
     });
 
     overlays.default = final: _: {quarry = self.packages.${final.stdenv.hostPlatform.system}.default;};
