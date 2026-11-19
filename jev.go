@@ -38,7 +38,9 @@ const (
 
 var (
 	jevClient = &http.Client{Timeout: 5 * time.Second} // jev answers in under a second; past 5 the page goes without
-	atx       = regexp.MustCompile(`^#{1,6} `)         // not #hashtag
+	atx       = regexp.MustCompile(`^ {0,3}(#{1,6})(?:[ \t]+(.*))?$`)
+	setext    = regexp.MustCompile(`^ {0,3}(=+|-+)[ \t]*$`)
+	fenceLine = regexp.MustCompile("^[ \t]*(`{3,}|~{3,})(.*)$")
 	linkTail  = regexp.MustCompile(`\]\([^)]*\)`)
 	mdLink    = regexp.MustCompile(`\[[^\]]*\]\([^)]*\)`)
 )
@@ -47,6 +49,7 @@ type section struct {
 	from, to int
 	trail    string // the headings it sits under, outermost first
 	text     string
+	headed   bool // it opens on a heading, rather than a split by size
 }
 
 // One section per heading outside code fences. Each carries the headings above
@@ -56,25 +59,39 @@ func sections(md []byte) []section {
 	var out []section
 	var buf []string
 	var trail [6]string // the current heading at each level
-	from, size, fenced, cur := 1, 0, false, ""
+	from, size, fence, cur, headed := 1, 0, "", "", false
 	flush := func(to int) {
 		if strings.TrimSpace(strings.Join(buf, "")) != "" {
-			out = append(out, section{from, to, cur, strings.Join(buf, "\n")})
+			out = append(out, section{from, to, cur, strings.Join(buf, "\n"), headed})
 		}
-		from, buf, size = to+1, nil, 0
+		from, buf, size, headed = to+1, nil, 0, false
 	}
 	for i, l := range lines {
-		if strings.HasPrefix(l, "```") {
-			fenced = !fenced
+		// a fence closes on a run of its own character at least as long;
+		// a backtick fence's info string holds no backtick
+		f := fenceLine.FindStringSubmatch(l)
+		if f != nil && fence == "" && !(f[1][0] == '`' && strings.Contains(f[2], "`")) {
+			fence = f[1]
+		} else if f != nil && fence != "" && f[1][0] == fence[0] && len(f[1]) >= len(fence) && strings.TrimSpace(f[2]) == "" {
+			fence = ""
 		}
-		heading := !fenced && atx.MatchString(l)
-		if len(buf) > 0 && (heading || (strings.TrimSpace(l) == "" && size > sectLong) || size > sectCap) {
+		level, title := 0, ""
+		if m := atx.FindStringSubmatch(l); fence == "" && m != nil {
+			level, title = len(m[1]), m[2]
+		} else if fence == "" && f == nil && strings.TrimSpace(l) != "" && !setext.MatchString(l) &&
+			i+1 < len(lines) && setext.MatchString(lines[i+1]) {
+			level, title = 1, l
+			if strings.TrimSpace(lines[i+1])[0] == '-' {
+				level = 2
+			}
+		}
+		if len(buf) > 0 && (level > 0 || (strings.TrimSpace(l) == "" && size > sectLong) || size > sectCap) {
 			flush(i)
 		}
-		if heading {
-			n := strings.IndexByte(l, ' ')
-			trail[n-1] = strings.TrimSpace(linkTail.ReplaceAllString(l[n:], "]"))
-			clear(trail[n:])
+		if level > 0 {
+			headed = true
+			trail[level-1] = strings.TrimSpace(linkTail.ReplaceAllString(title, "]"))
+			clear(trail[level:])
 			cur = strings.Join(slices.DeleteFunc(slices.Clone(trail[:]), func(h string) bool { return h == "" }), " › ")
 		}
 		buf, size = append(buf, l), size+len(l)+1
@@ -107,7 +124,7 @@ func locate(token string, md []byte, q string) (string, error) {
 		if h := strings.Count(s.trail, " › "); h <= 1 && (len(outline) == 0 || outline[len(outline)-1] != s.trail) && size < outlineCap {
 			outline, size = append(outline, s.trail), size+len(s.trail)
 		}
-		if atx.MatchString(s.text) {
+		if s.headed {
 			headed++
 		}
 		secs = append(secs, s)
