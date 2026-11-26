@@ -70,7 +70,7 @@ func main() {
 		return nil
 	})
 	fs.IntVar(&num, "n", 8, "")
-	get, find := fs.Bool("f", false, ""), fs.Bool("s", false, "")
+	get, find, papers := fs.Bool("f", false, ""), fs.Bool("s", false, ""), fs.Bool("p", false, "")
 
 	// flag stops at the first operand, so a flag after a url would be fetched as
 	// a page; resume after each operand so flags and urls mix in any order
@@ -83,7 +83,7 @@ func main() {
 		args, rest = append(args, fs.Arg(0)), fs.Args()[1:]
 	}
 	// the operation is named, never guessed from the operands
-	if len(args) == 0 || *get == *find {
+	if len(args) == 0 || (*get && *find) || (*get && *papers) || (*find && *papers) || !(*get || *find || *papers) {
 		fs.Usage()
 	}
 	apiKey = key("EXA_API_KEY", "exa-api-key")
@@ -104,8 +104,8 @@ func main() {
 		}
 	}
 
-	if *find {
-		search(strings.Join(args, " "))
+	if *find || *papers {
+		search(strings.Join(args, " "), *papers)
 		return
 	}
 	// the words among the urls are a question about them
@@ -138,13 +138,29 @@ func isURL(s string) bool { return strings.HasPrefix(s, "http://") || strings.Ha
 // ─── exa ───────────────────────────────────────────────────────────────────
 
 type exaResult struct {
-	ID, URL, Title, PublishedDate, Text string
-	Highlights                          []string
+	ID, URL, Title, PublishedDate, Author, Text string
+	Highlights                                  []string
+	Entities                                    []exaEntity
+}
+
+type exaEntity struct {
+	Type       string
+	Properties struct {
+		Year          int
+		CitationCount *int
+		Venue         string
+		Authors       []struct{ Name string }
+	}
+}
+
+type exaNotice struct {
+	Code, Message string
 }
 
 type exaResponse struct {
 	Results  []exaResult
 	Statuses []exaStatus
+	Notices  []exaNotice
 	Error    string
 }
 
@@ -182,14 +198,32 @@ func post(endpoint string, req map[string]any) (*exaResponse, error) {
 
 var spaces = regexp.MustCompile(`\s+`)
 
-func search(q string) {
+func search(q string, papers bool) {
+	// lift inline site: tokens into Exa's domain filter
+	inc := slices.Clone(include)
+	var kept []string
+	for _, tok := range strings.Fields(q) {
+		if h, ok := strings.CutPrefix(tok, "site:"); ok && h != "" {
+			inc = append(inc, scheme.ReplaceAllString(h, ""))
+		} else {
+			kept = append(kept, tok)
+		}
+	}
+	q = strings.Join(kept, " ")
+	if q == "" {
+		die("empty query")
+	}
+
 	req := map[string]any{
 		"query":      q,
 		"numResults": num,
 		"contents":   map[string]any{"highlights": map[string]any{"dynamic": true}},
 	}
-	if len(include) > 0 {
-		req["includeDomains"] = include
+	if papers {
+		req["category"] = "publication"
+	}
+	if len(inc) > 0 {
+		req["includeDomains"] = inc
 	}
 	if len(exclude) > 0 {
 		req["excludeDomains"] = exclude
@@ -198,8 +232,13 @@ func search(q string) {
 	if err != nil {
 		die("%v", err)
 	}
-	if len(res.Results) == 0 && len(include) > 0 {
-		die("no results from %s; exa may not index it", strings.Join(include, ", "))
+	for _, n := range res.Notices {
+		if n.Message != "" {
+			fmt.Fprintf(os.Stderr, "! %s\n", n.Message)
+		}
+	}
+	if len(res.Results) == 0 && len(inc) > 0 {
+		die("no results from %s; exa may not index it", strings.Join(inc, ", "))
 	} else if len(res.Results) == 0 {
 		die("no results")
 	}
@@ -210,8 +249,8 @@ func search(q string) {
 		if title == "" {
 			title = "untitled"
 		}
-		if len(r.PublishedDate) >= 10 {
-			title += "  (" + r.PublishedDate[:10] + ")"
+		if meta := resultMeta(r, papers); meta != "" {
+			title += "  (" + meta + ")"
 		}
 		fmt.Fprintf(w, "[%d] %s\n%s\n", i+1, title, r.URL)
 		for _, h := range r.Highlights {
@@ -219,6 +258,49 @@ func search(q string) {
 		}
 		fmt.Fprintln(w)
 	}
+}
+
+func resultMeta(r exaResult, papers bool) string {
+	var parts []string
+	if len(r.PublishedDate) >= 10 {
+		parts = append(parts, r.PublishedDate[:10])
+	}
+	if !papers {
+		return strings.Join(parts, " · ")
+	}
+	var authors, venue string
+	var cites *int
+	if idx := slices.IndexFunc(r.Entities, func(e exaEntity) bool { return e.Type == "publication" }); idx >= 0 {
+		p := r.Entities[idx].Properties
+		if len(parts) == 0 && p.Year > 0 {
+			parts = append(parts, fmt.Sprintf("%d", p.Year))
+		}
+		venue, cites = p.Venue, p.CitationCount
+		var names []string
+		for _, a := range p.Authors {
+			if a.Name != "" {
+				names = append(names, a.Name)
+			}
+		}
+		if len(names) > 3 {
+			authors = strings.Join(names[:3], ", ") + " et al."
+		} else {
+			authors = strings.Join(names, ", ")
+		}
+	}
+	if authors == "" {
+		authors = strings.TrimSpace(spaces.ReplaceAllString(r.Author, " "))
+	}
+	if authors != "" {
+		parts = append(parts, clip(authors, 60))
+	}
+	if venue != "" {
+		parts = append(parts, clip(venue, 40))
+	}
+	if cites != nil {
+		parts = append(parts, fmt.Sprintf("%d cit.", *cites))
+	}
+	return strings.Join(parts, " · ")
 }
 
 func clip(s string, n int) string {
@@ -328,10 +410,12 @@ func read(urls []string, question string) {
 		if saved {
 			fmt.Fprintf(w, "%s  (%d B, %d lines)\n", out, len(p.md), bytes.Count(p.md, []byte("\n")))
 			if question != "" && jevKey != "" {
-				if where, err := locate(jevKey, p.md, question); err != nil {
+				where, err := locate(jevKey, p.md, question)
+				if where != "" {
+					fmt.Fprintln(w, where)
+				}
+				if err != nil {
 					p.say("%v", err)
-				} else {
-					fmt.Fprintf(w, "  %s\n", where)
 				}
 			}
 		}
@@ -421,7 +505,11 @@ func fetch(u string) *page {
 	}
 
 	p.ok = true
-	switch ctype := resp.Header.Get("Content-Type"); {
+	ctype := resp.Header.Get("Content-Type")
+	if ctype == "" || strings.Contains(ctype, "octet-stream") {
+		ctype = http.DetectContentType(body)
+	}
+	switch {
 	case strings.Contains(ctype, "html"):
 		p.md = fromHTML(body, resp.Request.URL.String())
 	case strings.Contains(ctype, "json"):
