@@ -11,6 +11,7 @@ import (
 	"bytes"
 	"cmp"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"maps"
@@ -43,6 +44,9 @@ var (
 	fenceLine = regexp.MustCompile("^[ \t]*(`{3,}|~{3,})(.*)$")
 	linkTail  = regexp.MustCompile(`\]\([^)]*\)`)
 	mdLink    = regexp.MustCompile(`\[[^\]]*\]\([^)]*\)`)
+	numHead   = regexp.MustCompile(`^(?:\d+(?:\.\d+)*\.?|Appendix\s+[A-Z]\.?)\s+\S`)
+	codeDecl  = regexp.MustCompile(`^(?:pub\s+)?(?:static\s+|const\s+|inline\s+|extern\s+|async\s+)*(?:func|fn|def|class|struct|enum|type|impl|trait|interface|void|int|char|bool|size_t|ssize_t|uint\d+_t|int\d+_t)\b`)
+	rfcPage   = regexp.MustCompile(`\[Page \d+\]\s*$|^RFC \d+\s{2,}`)
 )
 
 type section struct {
@@ -66,6 +70,7 @@ func sections(md []byte) []section {
 		}
 		from, buf, size, headed = to+1, nil, 0, false
 	}
+	mdHeadings := 0
 	for i, l := range lines {
 		// a fence closes on a run of its own character at least as long;
 		// a backtick fence's info string holds no backtick
@@ -89,6 +94,7 @@ func sections(md []byte) []section {
 			flush(i)
 		}
 		if level > 0 {
+			mdHeadings++
 			headed = true
 			trail[level-1] = strings.TrimSpace(linkTail.ReplaceAllString(title, "]"))
 			clear(trail[level:])
@@ -97,7 +103,62 @@ func sections(md []byte) []section {
 		buf, size = append(buf, l), size+len(l)+1
 	}
 	flush(len(lines))
+	if mdHeadings == 0 {
+		return outdentSections(lines)
+	}
 	return out
+}
+
+// In plain text without markdown headings (RFCs, C/Zig/Go source), a column-0
+// numbered heading or top-level declaration after a blank line opens a section.
+// headed stays false so outdent lines never trigger the two-pass shortlist.
+func outdentSections(lines []string) []section {
+	var out []section
+	var buf []string
+	from, size, cur := 1, 0, ""
+	flush := func(to int) {
+		if strings.TrimSpace(strings.Join(buf, "")) != "" {
+			out = append(out, section{from, to, cur, strings.Join(buf, "\n"), false})
+		}
+		from, buf, size, cur = to+1, nil, 0, ""
+	}
+	prevBlank := true
+	for i, l := range lines {
+		blank := strings.TrimSpace(l) == ""
+		if !blank && prevBlank && isOutdentHeading(l) {
+			if len(buf) > 0 && size >= 200 {
+				flush(i)
+			}
+			if len(buf) == 0 {
+				title := strings.TrimSpace(l)
+				if len(title) <= 30 && !strings.ContainsAny(title, "({#") && i+1 < len(lines) &&
+					len(lines[i+1]) > 0 && lines[i+1][0] != ' ' && lines[i+1][0] != '\t' && strings.Contains(lines[i+1], "(") {
+					title += " " + strings.TrimSpace(lines[i+1])
+				}
+				cur = clip(title, 80)
+			}
+		} else if len(buf) > 0 && ((blank && size > sectLong) || size > sectCap) {
+			flush(i)
+		}
+		buf, size = append(buf, l), size+len(l)+1
+		prevBlank = blank
+	}
+	flush(len(lines))
+	return out
+}
+
+func isOutdentHeading(l string) bool {
+	if len(l) == 0 || l[0] == ' ' || l[0] == '\t' || l[0] == '\f' {
+		return false
+	}
+	t := strings.TrimSpace(l)
+	if len(t) < 2 || len(t) > 100 || rfcPage.MatchString(t) {
+		return false
+	}
+	if numHead.MatchString(t) && !strings.HasSuffix(t, ".") {
+		return true
+	}
+	return codeDecl.MatchString(t) || (strings.Contains(t, "(") && !strings.HasSuffix(t, ".") && !strings.HasSuffix(t, ","))
 }
 
 // locate names the line ranges of md likely to answer q, best first
@@ -115,13 +176,13 @@ func locate(token string, md []byte, q string) (string, error) {
 		all = kept
 	}
 	if len(all) <= 3 {
-		return fmt.Sprintf("a short page of %d sections; check it directly", len(all)), nil
+		return fmt.Sprintf("  a short page of %d sections; check it directly", len(all)), nil
 	}
 	var secs []section
 	var outline []string
 	size, headed := 0, 0
 	for _, s := range all {
-		if h := strings.Count(s.trail, " › "); h <= 1 && (len(outline) == 0 || outline[len(outline)-1] != s.trail) && size < outlineCap {
+		if h := strings.Count(s.trail, " › "); h <= 1 && s.trail != "" && (len(outline) == 0 || outline[len(outline)-1] != s.trail) && size < outlineCap {
 			outline, size = append(outline, s.trail), size+len(s.trail)
 		}
 		if s.headed {
@@ -145,26 +206,36 @@ func locate(token string, md []byte, q string) (string, error) {
 		slices.SortFunc(secs, func(a, b section) int { return cmp.Compare(p[b.key()], p[a.key()]) })
 		secs = secs[:min(len(secs), shortlist)]
 	}
-	p, err := score(token, state, secs, 0)
-	if err != nil {
-		return "", err
+	p, partialErr := score(token, state, secs, 0)
+	if len(p) == 0 {
+		return "", cmp.Or(partialErr, errors.New("no sections scored"))
 	}
 
-	keys := slices.DeleteFunc(slices.Collect(maps.Keys(p)), func(k string) bool { return p[k] < 0.7 })
-	if len(keys) == 0 {
-		return "no section scores as answering this", nil
+	scored := slices.DeleteFunc(slices.Clone(secs), func(s section) bool { _, ok := p[s.key()]; return !ok })
+	slices.SortFunc(scored, func(a, b section) int { return cmp.Compare(p[b.key()], p[a.key()]) })
+	above := 0
+	for _, s := range scored {
+		if p[s.key()] >= 0.7 {
+			above++
+		}
 	}
-	slices.SortFunc(keys, func(a, b string) int { return cmp.Compare(p[b], p[a]) })
-	var parts []string
-	for _, k := range keys[:min(len(keys), 3)] {
-		parts = append(parts, fmt.Sprintf("%s (%.2f)", k, p[k]))
+	if above == 0 && p[scored[0].key()] < 0.15 {
+		return fmt.Sprintf("  no section scores as answering this (highest: %.2f)", p[scored[0].key()]), partialErr
 	}
-	// a listing page answers an open request everywhere at once; three of
-	// fourteen near-ties are picked by noise, so say how wide the field is
-	if len(keys)*3 > total {
-		return fmt.Sprintf("%d of %d sections score as answering it, so these pointers are near-ties; best first: lines %s", len(keys), total, strings.Join(parts, ", ")), nil
+	var lines []string
+	if above == 0 {
+		lines = append(lines, "  nothing scores above 0.7; nearest:")
+	} else if above*3 > total {
+		lines = append(lines, fmt.Sprintf("  %d of %d sections score above 0.7 (near-ties):", above, total))
 	}
-	return "read lines " + strings.Join(parts, ", "), nil
+	for _, s := range scored[:min(len(scored), 3)] {
+		if s.trail != "" {
+			lines = append(lines, fmt.Sprintf("  %s (%.2f)  %s", s.key(), p[s.key()], clip(s.trail, 80)))
+		} else {
+			lines = append(lines, fmt.Sprintf("  %s (%.2f)", s.key(), p[s.key()]))
+		}
+	}
+	return strings.Join(lines, "\n"), partialErr
 }
 
 func (s section) key() string { return fmt.Sprintf("%d–%d", s.from, s.to) }
@@ -173,6 +244,8 @@ func (s section) key() string { return fmt.Sprintf("%d–%d", s.from, s.to) }
 // reading only its first peek characters when peek > 0; the sections spread
 // over parallel requests of jevBudget characters each
 func score(token string, state map[string]any, secs []section, peek int) (map[string]float64, error) {
+	stateBytes, _ := json.Marshal(state)
+	stateLen := len(stateBytes)
 	var batches []map[string]any
 	size := jevBudget
 	for _, s := range secs {
@@ -190,7 +263,7 @@ func score(token string, state map[string]any, secs []section, peek int) (map[st
 		}}
 		b, _ := json.Marshal(q)
 		if size+len(b) > jevBudget {
-			batches, size = append(batches, map[string]any{}), 0
+			batches, size = append(batches, map[string]any{}), stateLen
 		}
 		batches[len(batches)-1][s.key()] = q
 		size += len(b)
@@ -204,23 +277,60 @@ func score(token string, state map[string]any, secs []section, peek int) (map[st
 	)
 	for _, qs := range batches {
 		wg.Go(func() {
-			var out struct {
-				Answers map[string]struct{ Noul float64 }
-			}
-			err := jevPost(token, map[string]any{"model": "jev-latest", "state": state, "questions": qs}, &out)
+			got, err := scoreBatch(token, state, qs)
 			mu.Lock()
 			defer mu.Unlock()
 			if firstErr == nil {
 				firstErr = err
 			}
-			for k, a := range out.Answers {
-				p[k] = a.Noul
-			}
+			maps.Copy(p, got)
 		})
 	}
 	wg.Wait()
 	return p, firstErr
 }
+
+// scoreBatch posts one batch and bisects on max_tokens_exceeded so dense
+// code or hex dumps never fail a request.
+func scoreBatch(token string, state map[string]any, qs map[string]any) (map[string]float64, error) {
+	var out struct {
+		Answers map[string]struct{ Noul float64 }
+	}
+	err := jevPost(token, map[string]any{"model": "jev-latest", "state": state, "questions": qs}, &out)
+	var je *jevError
+	if errors.As(err, &je) && je.kind == "max_tokens_exceeded" && len(qs) > 1 {
+		keys := slices.Collect(maps.Keys(qs))
+		mid := len(keys) / 2
+		left, right := make(map[string]any, mid), make(map[string]any, len(keys)-mid)
+		for _, k := range keys[:mid] {
+			left[k] = qs[k]
+		}
+		for _, k := range keys[mid:] {
+			right[k] = qs[k]
+		}
+		got := map[string]float64{}
+		l, errL := scoreBatch(token, state, left)
+		r, errR := scoreBatch(token, state, right)
+		maps.Copy(got, l)
+		maps.Copy(got, r)
+		return got, cmp.Or(errL, errR)
+	}
+	if err != nil {
+		return nil, err
+	}
+	got := make(map[string]float64, len(out.Answers))
+	for k, a := range out.Answers {
+		got[k] = a.Noul
+	}
+	return got, nil
+}
+
+type jevError struct {
+	status    int
+	kind, msg string
+}
+
+func (e *jevError) Error() string { return fmt.Sprintf("jev %d: %s", e.status, e.msg) }
 
 func jevPost(token string, req map[string]any, out any) error {
 	body, _ := json.Marshal(req)
@@ -244,7 +354,11 @@ func jevPost(token string, req map[string]any, out any) error {
 			}
 		}
 		json.Unmarshal(b, &e)
-		return fmt.Errorf("jev %d: %s", resp.StatusCode, cmp.Or(e.Detail.Message, e.Detail.ErrorType, resp.Status))
+		return &jevError{
+			status: resp.StatusCode,
+			kind:   e.Detail.ErrorType,
+			msg:    cmp.Or(e.Detail.Message, e.Detail.ErrorType, resp.Status),
+		}
 	}
 	return json.Unmarshal(b, out)
 }
