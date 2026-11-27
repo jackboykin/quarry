@@ -399,6 +399,7 @@ func read(urls []string, question string) {
 				os.WriteFile(bin, p.bin, 0o644)
 				p.md = fmt.Appendf(p.md, "saved to %s\n", bin)
 			}
+			p.md = wrap(p.md)
 			saved = os.WriteFile(out, p.md, 0o644) == nil
 		} else if fi, err := os.Stat(out); err == nil {
 			p.say("kept the copy saved %s", fi.ModTime().Format("2006-01-02 15:04"))
@@ -423,6 +424,29 @@ func read(urls []string, question string) {
 			fmt.Fprintf(os.Stderr, "! %s: %s\n", p.url, strings.Join(p.notes, "; "))
 		}
 	}
+}
+
+// file tools cut a line at 2000 characters
+const lineCap = 2000
+
+func wrap(md []byte) []byte {
+	out := make([]byte, 0, len(md)+len(md)/lineCap+1)
+	for line := range bytes.Lines(md) {
+		line = bytes.TrimSuffix(line, []byte("\n"))
+		for len(line) > lineCap {
+			cut := bytes.LastIndex(line[:lineCap], []byte(". ")) + 1 // the space after it
+			if cut < lineCap/2 {
+				cut = bytes.LastIndexByte(line[:lineCap], ' ')
+			}
+			if cut <= 0 {
+				break
+			}
+			out = append(append(out, line[:cut]...), '\n')
+			line = line[cut+1:]
+		}
+		out = append(append(out, line...), '\n')
+	}
+	return out
 }
 
 // A current desktop Chrome with the headers Chrome sends alongside its
