@@ -5,6 +5,8 @@ Claude Code's WebFetch and similar tools give the main model a small model's sum
 - **fetch**: saves the page to disk and hands the model its path, with the line ranges [Jev](https://typesafe.ai) scores as answering the prompt. Every page is also asked of Exa, whose copy is kept when the page as served came back hollow: a login wall, a footer, a file view cut short.
 - **search**: [Exa](https://exa.ai)'s results with highlights (`-s` web, `-p` academic papers).
 
+It exits 0 when everything asked for came back, 1 when some did not (no results, a page not saved), and 2 when it could not run.
+
 ## Install
 
 ```sh

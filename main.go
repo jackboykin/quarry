@@ -91,7 +91,7 @@ func main() {
 	// user on the machine can read
 	cache, err := os.UserCacheDir()
 	if err != nil {
-		die("%v", err)
+		die(2, "%v", err)
 	}
 	outDir = cache + "/quarry"
 	os.MkdirAll(outDir, 0o700)
@@ -111,12 +111,17 @@ func main() {
 	// the words among the urls are a question about them
 	urls := slices.DeleteFunc(slices.Clone(args), func(a string) bool { return !isURL(a) })
 	if len(urls) == 0 {
-		die("-f needs at least one http(s) url")
+		die(2, "-f needs at least one http(s) url")
 	}
-	read(urls, strings.Join(slices.DeleteFunc(args, isURL), " "))
+	if !read(urls, strings.Join(slices.DeleteFunc(args, isURL), " ")) {
+		os.Exit(1)
+	}
 }
 
-func die(f string, a ...any) { fmt.Fprintf(os.Stderr, "quarry: "+f+"\n", a...); os.Exit(1) }
+func die(code int, f string, a ...any) {
+	fmt.Fprintf(os.Stderr, "quarry: "+f+"\n", a...)
+	os.Exit(code)
+}
 
 // key reads an api key from $env, else from ~/.config/quarry/file, on every
 // platform, as gh and most command-line tools do
@@ -173,7 +178,7 @@ var exaClient = &http.Client{Timeout: 120 * time.Second}
 
 func post(endpoint string, req map[string]any) (*exaResponse, error) {
 	if apiKey == "" {
-		die("no exa api key ($EXA_API_KEY or ~/.config/quarry/exa-api-key)")
+		die(2, "no exa api key ($EXA_API_KEY or ~/.config/quarry/exa-api-key)")
 	}
 	body, _ := json.Marshal(req)
 	r, _ := http.NewRequest("POST", "https://api.exa.ai/"+endpoint, bytes.NewReader(body))
@@ -211,7 +216,7 @@ func search(q string, papers bool) {
 	}
 	q = strings.Join(kept, " ")
 	if q == "" {
-		die("empty query")
+		die(2, "empty query")
 	}
 
 	req := map[string]any{
@@ -230,7 +235,7 @@ func search(q string, papers bool) {
 	}
 	res, err := post("search", req)
 	if err != nil {
-		die("%v", err)
+		die(2, "%v", err)
 	}
 	for _, n := range res.Notices {
 		if n.Message != "" {
@@ -238,9 +243,9 @@ func search(q string, papers bool) {
 		}
 	}
 	if len(res.Results) == 0 && len(inc) > 0 {
-		die("no results from %s; exa may not index it", strings.Join(inc, ", "))
+		die(1, "no results from %s; exa may not index it", strings.Join(inc, ", "))
 	} else if len(res.Results) == 0 {
-		die("no results")
+		die(1, "no results")
 	}
 	w := bufio.NewWriter(os.Stdout)
 	defer w.Flush()
@@ -329,7 +334,7 @@ var (
 	word    = regexp.MustCompile(`[\p{L}\p{N}]+`)
 )
 
-func read(urls []string, question string) {
+func read(urls []string, question string) (all bool) {
 	// Every page is also asked of exa, and exa's copy kept when it has over
 	// twice the words: where both got the page they agree within a few
 	// percent, and where one did not, the other has many times the text.
@@ -359,6 +364,7 @@ func read(urls []string, question string) {
 	jevKey := key("TYPESAFE_API_KEY", "typesafe-api-key")
 	w := bufio.NewWriter(os.Stdout)
 	defer w.Flush()
+	all = true
 	for _, p := range pages {
 		out := outDir + "/" + slug(p.url) + ".md"
 		var hit exaResult
@@ -406,6 +412,7 @@ func read(urls []string, question string) {
 			p.md, _ = os.ReadFile(out)
 			saved = true
 		}
+		all = all && saved
 		// stdout holds only what was saved, so a line there is a file to read;
 		// what went wrong goes to stderr
 		if saved {
@@ -424,6 +431,7 @@ func read(urls []string, question string) {
 			fmt.Fprintf(os.Stderr, "! %s: %s\n", p.url, strings.Join(p.notes, "; "))
 		}
 	}
+	return all
 }
 
 // file tools cut a line at 2000 characters
@@ -434,7 +442,7 @@ func wrap(md []byte) []byte {
 	for line := range bytes.Lines(md) {
 		line = bytes.TrimSuffix(line, []byte("\n"))
 		for len(line) > lineCap {
-			cut := bytes.LastIndex(line[:lineCap], []byte(". ")) + 1 // the space after it
+			cut := bytes.LastIndex(line[:lineCap], []byte(". ")) + 1
 			if cut < lineCap/2 {
 				cut = bytes.LastIndexByte(line[:lineCap], ' ')
 			}
